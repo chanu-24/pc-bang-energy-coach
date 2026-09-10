@@ -9,7 +9,7 @@ st.set_page_config(
     layout="centered"
 )
 
-# 1. 백엔드: Pandas 데이터 및 계산 파이프라인 (15문항 기반 정밀 연동)
+# 1. 백엔드: Pandas 데이터 및 계산 파이프라인
 @st.cache_data
 def load_pc_bang_data():
     equipment_df = pd.DataFrame([
@@ -33,11 +33,9 @@ def calculate_energy_impact(answers, equipment_df):
         eq = row["equipment"]
         
         if eq == "PC_MONITOR":
-            # 빈 좌석 비율 반영 (예: 1~30% 빈 좌석 가정 시 비효율 가중치 부여)
             idle_ratio_map = {"0%": 1.0, "1~10%": 1.05, "11~30%": 1.15, "31~50%": 1.3, "51% 이상": 1.4, "모름": 1.1}
             idle_weight = idle_ratio_map.get(answers.get("q3_idle", "1~10%"), 1.1)
             
-            # PC 관리 방식별 가중치
             manage_map = {"자동 절전": 0.9, "자동 종료": 0.9, "직접 종료": 1.0, "모니터만 끔": 1.2, "둘 다 켜둠": 1.4, "모름": 1.1}
             manage_weight = manage_map.get(answers.get("q4_pc_manage", "직접 종료"), 1.1)
             
@@ -49,7 +47,7 @@ def calculate_energy_impact(answers, equipment_df):
             
             monthly_kwh = row["rated_power_kw"] * ac_count * ac_hours * 30 * temp_weight
             
-        else: # 조명 및 기타
+        else:
             light_map = {"LED": 0.8, "LED와 일반조명 혼합": 1.1, "형광등·일반조명 중심": 1.4, "모름": 1.2}
             light_weight = light_map.get(answers.get("q14_light", "형광등·일반조명 중심"), 1.2)
             
@@ -67,7 +65,7 @@ def calculate_energy_impact(answers, equipment_df):
         })
     return pd.DataFrame(results)
 
-# 2. 백엔드: Python Rule Engine (15문항 세부 진단)
+# 2. 백엔드: Python Rule Engine
 def python_rule_engine(answers):
     diagnoses = []
     
@@ -133,11 +131,16 @@ def search_rag_guides(equipment_type):
     results = rag_collection.query(query_texts=["에너지 절감 방법 가이드"], n_results=1, where={"equipment": equipment_type})
     return results["documents"][0][0] if results["documents"] else "관련 공식 가이드가 없습니다."
 
-# 4. 세션 상태 초기화
+# 4. 세션 상태 안전 초기화
 if "step" not in st.session_state:
     st.session_state.step = 1
 if "answers" not in st.session_state:
-    st.session_state.answers = {}
+    st.session_state.answers = {
+        "pc_count": 100, "op_hours": 24, "ac_count": 4, "ac_hours": 10,
+        "q3_idle": "1~10%", "q4_pc_manage": "직접 종료", "q9_temp": "25℃",
+        "q11_filter": "1 개월 초과~3 개월", "q12_door": "출입할 때만 열고 닫음",
+        "q13_lighting": "구역별로 모두 끔", "q14_light": "형광등·일반조명 중심"
+    }
 
 # [페이지 1] 15가지 상세 설문 입력폼
 if st.session_state.step == 1:
@@ -146,25 +149,25 @@ if st.session_state.step == 1:
     
     with st.form("survey_15_form"):
         st.subheader("1 매장 운영과 빈 좌석 관리")
-        pc_count = st.number_input("1. PC방 좌석은 총 몇 석인가요?", min_value=10, max_value=500, value=100, step=10)
-        op_hours = st.slider("2. 하루에 몇 시간 영업하시나요?", min_value=1, max_value=24, value=24)
+        pc_count = st.number_input("1. PC방 좌석은 총 몇 석인가요?", min_value=10, max_value=500, value=st.session_state.answers.get("pc_count", 100), step=10)
+        op_hours = st.slider("2. 하루에 몇 시간 영업하시나요?", min_value=1, max_value=24, value=st.session_state.answers.get("op_hours", 24))
         q3_idle = st.radio("3. 영업시간 전체를 평균으로 보면 빈 좌석은 어느 정도인가요?", ["0%", "1~10%", "11~30%", "31~50%", "51% 이상", "모름"])
         q4_pc_manage = st.radio("4. 손님이 없는 좌석의 PC와 모니터는 어떻게 관리하시나요?", ["자동 절전", "자동 종료", "직접 종료", "모니터만 끔", "둘 다 켜둠", "모름"])
         
         st.subheader("2 장비 정보와 냉방 관리")
         q5_spec = st.radio("5. PC 한 대의 주요 사양은 어떻게 되나요?", ["일반형", "중고사양", "고사양", "여러 사양 혼합", "모름"])
-        q6_power = st.text_input("6. PC 1 대의 전력 표시값을 알고 계신가요? (예: 파워 용량 또는 실측값)", value="모름")
+        q6_power = st.text_input("6. PC 1 대의 전력 표시값을 알고 계신가요?", value="모름")
         q7_monitor = st.radio("7. 사용 중인 모니터 크기는 어느 정도인가요?", ["24인치 이하", "24인치 초과~27 인치", "27인치 초과~32 인치", "32 인치 초과", "혼합", "모름"])
-        ac_count = st.number_input("8. 매장에 설치된 에어컨은 총 몇 대인가요? (없으면 0)", min_value=0, max_value=30, value=4)
+        ac_count = st.number_input("8. 매장에 설치된 에어컨은 총 몇 대인가요?", min_value=0, max_value=30, value=st.session_state.answers.get("ac_count", 4))
         q9_temp = st.radio("9. 여름철 에어컨은 보통 몇 ℃로 설정하시나요?", ["22℃ 이하", "23~24℃", "25℃", "26℃ 이상", "모름", "미사용"])
-        ac_hours = st.slider("10. 냉방하는 날에는 에어컨을 하루 평균 몇 시간 사용하시나요?", min_value=0, max_value=24, value=10)
+        ac_hours = st.slider("10. 냉방하는 날에는 에어컨을 하루 평균 몇 시간 사용하시나요?", min_value=0, max_value=24, value=st.session_state.answers.get("ac_hours", 10))
         
         st.subheader("3 냉방 습관과 조명 및 월 사용량")
         q11_filter = st.radio("11. 에어컨 필터는 얼마나 자주 청소하시나요?", ["2 주 이내", "2 주 초과~1 개월", "1 개월 초과~3 개월", "3 개월 초과", "거의 안 함", "모름"])
         q12_door = st.radio("12. 냉방 중 출입문은 어떻게 관리하시나요?", ["출입할 때만 열고 닫음", "자주 열려있음", "계속 열어둠", "모름", "미사용"])
         q13_lighting = st.radio("13. 손님이 없는 구역의 조명은 어떻게 관리하시나요?", ["구역별로 모두 끔", "일부만 끔", "계속 켜둠", "빈 구역 없음", "모름"])
         q14_light = st.radio("14. 매장 조명은 대부분 어떤 종류인가요?", ["LED", "LED와 일반조명 혼합", "형광등·일반조명 중심", "모름"])
-        q15_bill = st.text_input("15. 최근 한 달 전기사용량을 알고 계신가요? (예: 사용량 kWh 또는 요금 원)", value="모름")
+        q15_bill = st.text_input("15. 최근 한 달 전기사용량을 알고 계신가요?", value="모름")
 
         submitted = st.form_submit_button("AI 정밀 진단하기 🚀", use_container_width=True)
         if submitted:
@@ -204,7 +207,7 @@ elif st.session_state.step == 2:
             delta_color="inverse"
         )
     with col2:
-        st.info(f"💡 **AI 코치 진단**: 입력하신 **{st.session_state.answers['pc_count']}석** 매장의 15개 설문 항목 분석 결과입니다.")
+        st.info(f"💡 **AI 코치 진단**: 입력하신 **{st.session_state.answers.get('pc_count', 100)}석** 매장의 15개 설문 항목 분석 결과입니다.")
         
     st.subheader("🚨 가장 먼저 확인해야 할 영역 (Rule Engine + RAG)")
     for diag in diagnoses:
@@ -230,13 +233,13 @@ elif st.session_state.step == 2:
 
 # [페이지 3] 예상 절감 효과 및 감액 상세 분석
 elif st.session_state.step == 3:
-    st.title(f"📈 예상 절감 효과 상세 분석 ({st.session_state.answers['pc_count']}석 기준)")
+    pc_count_val = st.session_state.answers.get("pc_count", 100)
+    st.title(f"📈 예상 절감 효과 상세 분석 ({pc_count_val}석 기준)")
     st.write("입력하신 매장 운영 정보 및 15개 진단 결과를 바탕으로 산출된 월간 전력 사용량 및 요금 감액 비교입니다.")
     
     eq_df = load_pc_bang_data()
     before_impact_df = calculate_energy_impact(st.session_state.answers, eq_df)
     
-    # 개선 후 시나리오 (위험 요소 개선 시 소비량 약 18% 절감 가정)
     optimized_answers = st.session_state.answers.copy()
     optimized_answers["q3_idle"] = "1~10%"
     optimized_answers["q4_pc_manage"] = "자동 절전"
