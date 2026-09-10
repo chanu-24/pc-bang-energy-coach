@@ -9,14 +9,15 @@ st.set_page_config(
     layout="centered"
 )
 
-# 1. 백엔드: 식당 설비가 포함된 4대 설비 정격 스펙 및 상세 계산 파이프라인
+# 1. 백엔드: 조명과 기타 설비를 분리한 5대 설비 정격 스펙 및 상세 계산 파이프라인
 @st.cache_data
 def load_pc_bang_data():
     equipment_df = pd.DataFrame([
         {"equipment": "PC_MONITOR", "name": "💻 PC 및 모니터 (대기전력 관리)", "rated_power_kw": 0.25, "default_hours": 24},
         {"equipment": "HVAC", "name": "❄️ 에어컨 및 환기 설비 (냉방/공조)", "rated_power_kw": 3.5, "default_hours": 10},
         {"equipment": "KITCHEN", "name": "🍳 주방·식당 설비 (라면조리기/쇼케이스)", "rated_power_kw": 2.0, "default_hours": 12},
-        {"equipment": "LIGHTING", "name": "💡 매장 조명 및 기타 설비", "rated_power_kw": 1.0, "default_hours": 12}
+        {"equipment": "LIGHTING", "name": "💡 매장 조명 설비 (간판/인테리어)", "rated_power_kw": 0.8, "default_hours": 12},
+        {"equipment": "ETC", "name": "🔌 기타 부대 설비 (정수기·제빙기·서버)", "rated_power_kw": 0.5, "default_hours": 24}
     ])
     return equipment_df
 
@@ -61,12 +62,16 @@ def calculate_detailed_impact(answers, equipment_df):
             b_kwh = row["rated_power_kw"] * (pc_count / 30) * 12 * 30 * unknown_penalty
             a_kwh = b_kwh * 0.85
             
-        else: # LIGHTING
+        elif eq == "LIGHTING":
             light_map = {"LED": 0.8, "LED와 일반조명 혼합": 1.1, "형광등·일반조명 중심": 1.4, "모름": 1.3}
             light_w = light_map.get(answers.get("q14_light", "형광등·일반조명 중심"), 1.2)
             
-            b_kwh = row["rated_power_kw"] * (pc_count / 20) * 12 * 30 * light_w * unknown_penalty
-            a_kwh = b_kwh * 0.85
+            b_kwh = row["rated_power_kw"] * (pc_count / 25) * 12 * 30 * light_w * unknown_penalty
+            a_kwh = b_kwh * 0.80
+            
+        else: # ETC (기타 부대 설비)
+            b_kwh = row["rated_power_kw"] * 5 * 24 * 30 * unknown_penalty
+            a_kwh = b_kwh * 0.90
 
         b_cost = b_kwh * KRW_PER_KWH
         a_cost = a_kwh * KRW_PER_KWH
@@ -134,7 +139,8 @@ def init_rag_db():
         col.add(ids=["doc_1"], documents=["[에너지공단] PC·모니터 절전: 빈 좌석 자동 타임아웃 및 마스터 차단기로 대기전력 원천 차단."], metadatas=[{"equipment": "PC_MONITOR"}])
         col.add(ids=["doc_2"], documents=["[에너지공단] 냉방 효율화: 에어컨 설정온도 26도 유지 및 문 닫고 냉방하기로 전력 손실 방지."], metadatas=[{"equipment": "HVAC"}])
         col.add(ids=["doc_3"], documents=["[에너지공단] 주방·식당 가전: 라면조리기/쇼케이스 야간 단열 커튼 설치 및 예열 관리."], metadatas=[{"equipment": "KITCHEN"}])
-        col.add(ids=["doc_4"], documents=["[에너지공단] 고효율 조명 이용 및 불필요한 조명 끄기: 미사용 구역 소등 및 LED 교체."], metadatas=[{"equipment": "LIGHTING"}])
+        col.add(ids=["doc_4"], documents=["[에너지공단] 매장 조명 설비: 미사용 구역 소등 및 고효율 LED 조명 교체."], metadatas=[{"equipment": "LIGHTING"}])
+        col.add(ids=["doc_5"], documents=["[에너지공단] 기타 부대 설비: 정수기 및 제빙기 절전 모드 활용."], metadatas=[{"equipment": "ETC"}])
     return col
 
 rag_collection = init_rag_db()
@@ -260,7 +266,6 @@ elif st.session_state.step == 3:
     saved_kwh = int(tot_b_kwh - tot_a_kwh)
     saved_carb = round(tot_b_carb - tot_a_carb, 1)
     
-    # 글자 잘림 방지 HTML 커스텀 카드 박스 적용
     col1, col2, col3 = st.columns(3)
     
     with col1:
