@@ -9,8 +9,7 @@ st.set_page_config(
     layout="centered"
 )
 
-# 1. 백엔드: Pandas 데이터 및 계산 파이프라인 (캐싱 처리)
-@st.cache_data
+# 1. 백엔드: Pandas 데이터 및 계산 파이프라인
 def load_pc_bang_data():
     equipment_df = pd.DataFrame([
         {"equipment": "PC_MONITOR", "name": "게이밍 PC 및 모니터 대기전력", "rated_power_kw": 0.25, "default_hours": 24},
@@ -46,6 +45,7 @@ def calculate_energy_impact(survey_answers, equipment_df):
 def python_rule_engine(answers):
     diagnoses = []
     
+    # 룰 1: PC 대기전력 관리
     if answers.get("q1_pc_standby") == "방치함":
         diagnoses.append({
             "waste_code": "PC_STANDBY_POWER", "equipment": "PC_MONITOR", "risk_score": 90,
@@ -53,6 +53,7 @@ def python_rule_engine(answers):
             "description": "손님이 없는 좌석의 본체·모니터·노하드 서버 주변기기가 24시간 대기전력을 소모하고 있습니다."
         })
         
+    # 룰 2: 노하드 서버/랜선 스위치 전원
     if answers.get("q2_server_power") == "상시 켜둠(개선 필요)":
         diagnoses.append({
             "waste_code": "SERVER_IDLE", "equipment": "PC_MONITOR", "risk_score": 75,
@@ -60,6 +61,7 @@ def python_rule_engine(answers):
             "description": "영업 마감 후에도 불필요한 네트워크 장비 및 허브가 최대 전력으로 구동 중입니다."
         })
 
+    # 룰 3: 냉난방기 온도 및 가동 방식
     if answers.get("q3_hvac_temp") == "과도한 저온/고온 유지":
         diagnoses.append({
             "waste_code": "HVAC_OVER_USE", "equipment": "HVAC", "risk_score": 85,
@@ -67,6 +69,7 @@ def python_rule_engine(answers):
             "description": "실내 적정 온도(여름 26도, 겨울 18~20도)를 초과하여 에어컨·히터가 비효율적으로 돌아갑니다."
         })
 
+    # 룰 4: 환기 시스템 타이머
     if answers.get("q4_ventilation") == "24시간 연속 가동":
         diagnoses.append({
             "waste_code": "VENT_CONTINUOUS", "equipment": "HVAC", "risk_score": 65,
@@ -74,6 +77,7 @@ def python_rule_engine(answers):
             "description": "새벽 시간대 이용객이 적음에도 급·배기 환기팬이 최고 속도로 가동되고 있습니다."
         })
 
+    # 룰 5: 주방 조리기구(라면기, 튀김기) 예열
     if answers.get("q5_kitchen_preheat") == "상시 고온 예열 유지":
         diagnoses.append({
             "waste_code": "KITCHEN_PREHEAT", "equipment": "KITCHEN", "risk_score": 80,
@@ -81,6 +85,7 @@ def python_rule_engine(answers):
             "description": "주문이 없는 시간대에도 조리기구 온도가 상시 유지되어 전력 손실이 큽니다."
         })
 
+    # 룰 6: 냉장/냉동 쇼케이스 (음료수 냉장고)
     if answers.get("q6_fridge_curtain") == "야간 커튼/문 없음":
         diagnoses.append({
             "waste_code": "FRIDGE_LOSS", "equipment": "KITCHEN", "risk_score": 60,
@@ -88,6 +93,7 @@ def python_rule_engine(answers):
             "description": "야간 마감 시간대 오픈형 쇼케이스에 단열 커튼이나 도어가 없어 냉기가 유실됩니다."
         })
 
+    # 룰 7: 매장 조명 및 간판 타이머
     if answers.get("q7_signage_light") == "수동 제어 또는 24시간 켜둠":
         diagnoses.append({
             "waste_code": "LIGHT_OVERUSE", "equipment": "LIGHTING", "risk_score": 50,
@@ -95,6 +101,7 @@ def python_rule_engine(answers):
             "description": "심야 영업 종료 후에도 간판 조명과 내부 인테리어 조명이 계속 켜져 있습니다."
         })
 
+    # 위험도 순 정렬 (없으면 기본 진단 1개 추가)
     if not diagnoses:
         diagnoses.append({
             "waste_code": "GENERAL_OPTIMIZE", "equipment": "LIGHTING", "risk_score": 40,
@@ -104,16 +111,15 @@ def python_rule_engine(answers):
         
     return sorted(diagnoses, key=lambda x: x["risk_score"], reverse=True)
 
-# 3. 백엔드: ChromaDB RAG (스로틀링 방지를 위한 완벽한 캐싱 및 중복 방지)
+# 3. 백엔드: ChromaDB RAG
 @st.cache_resource
 def init_rag_db():
     client = chromadb.Client()
     col = client.get_or_create_collection(name="pc_bang_energy_guide")
-    if col.count() == 0:
-        col.add(ids=["doc_1"], documents=["[에너지공단] PC방 대기전력 저감: 퇴실 후 타임아웃 및 마스터 차단 시스템으로 본체/주변기기 전력 원천 차단."], metadatas=[{"equipment": "PC_MONITOR"}])
-        col.add(ids=["doc_2"], documents=["[에너지공단] 공조·냉난방 효율화: 심야 시간대 중앙 제어 및 타이머 연동으로 전력 소모 방지."], metadatas=[{"equipment": "HVAC"}])
-        col.add(ids=["doc_3"], documents=["[에너지공단] 주방 가전 절감: 조리기구는 주문 직전 예열 시작 및 브레이크 타임 전원 차단 권장."], metadatas=[{"equipment": "KITCHEN"}])
-        col.add(ids=["doc_4"], documents=["[에너지공단] 조명 및 설비: 간판 조명은 타이머 스위치 의무 장착 및 고효율 LED로 교체."], metadatas=[{"equipment": "LIGHTING"}])
+    col.add(ids=["doc_1"], documents=["[에너지공단] PC방 대기전력 저감: 퇴실 후 타임아웃 및 마스터 차단 시스템으로 본체/주변기기 전력 원천 차단."], metadatas=[{"equipment": "PC_MONITOR"}])
+    col.add(ids=["doc_2"], documents=["[에너지공단] 공조·냉난방 효율화: 심야 시간대 중앙 제어 및 타이머 연동으로 불필요한 전력 소모 방지."], metadatas=[{"equipment": "HVAC"}])
+    col.add(ids=["doc_3"], documents=["[에너지공단] 주방 가전 절감: 조리기구는 주문 직전 예열 시작 및 브레이크 타임 전원 차단 권장."], metadatas=[{"equipment": "KITCHEN"}])
+    col.add(ids=["doc_4"], documents=["[에너지공단] 조명 및 설비: 간판 조명은 타이머 스위치 의무 장착 및 고효율 LED로 교체."], metadatas=[{"equipment": "LIGHTING"}])
     return col
 
 rag_collection = init_rag_db()
@@ -126,7 +132,7 @@ def search_rag_guides(equipment_type):
 if "step" not in st.session_state:
     st.session_state.step = 1
 
-# [페이지 1] 10문항 상세 설문지
+# [페이지 1] 10~15문항 상세 설문지
 if st.session_state.step == 1:
     st.title("⚡ PC방 에너지 진단 설문 (약 1분 소요)")
     st.write("매장의 PC, 냉난방, 주방, 조명 설비 운영 방식을 선택해 주세요.")
@@ -152,12 +158,14 @@ if st.session_state.step == 1:
 
         submitted = st.form_submit_button("AI 정밀 진단하기 🚀", use_container_width=True)
         if submitted:
+            # 설문 결과를 딕셔너리로 저장
             answers = {
                 "q1_pc_standby": q1, "q2_server_power": q2,
                 "q3_hvac_temp": q3, "q4_ventilation": q4,
                 "q5_kitchen_preheat": q5, "q6_fridge_curtain": q6,
                 "q7_signage_light": q8
             }
+            # 설비별 가중치 계산 부여
             weights = {
                 "PC_MONITOR": 1.5 if q1 == "방치함" else 1.0,
                 "HVAC": 1.4 if q3 == "과도한 저온/고온 유지" else 1.0,
@@ -175,9 +183,24 @@ elif st.session_state.step == 2:
     st.title("🔍 AI 에너지 진단 결과")
     diagnoses = python_rule_engine(st.session_state.survey_answers)
     
+    # [동적 점수 계산 로직] 룰 엔진에 잡힌 위험 점수 평균을 바탕으로 효율 점수 산출 (기본 100점에서 감점)
+    if diagnoses:
+        avg_risk = sum([d["risk_score"] for d in diagnoses]) / len(diagnoses)
+        # 위험도가 높을수록 효율 점수가 낮아짐 (최저 30점 ~ 최고 90점 사이로 매핑)
+        efficiency_score = max(30, int(100 - (avg_risk * 0.7)))
+    else:
+        efficiency_score = 90
+        
+    score_delta = efficiency_score - 100
+    
     col1, col2 = st.columns([1, 2])
     with col1:
-        st.metric(label="종합 에너지 효율 점수", value="58점", delta="-15점", delta_color="inverse")
+        st.metric(
+            label="종합 에너지 효율 점수", 
+            value=f"{efficiency_score}점", 
+            delta=f"{score_delta}점 (개선 필요)" if efficiency_score < 80 else "매우 우수함", 
+            delta_color="inverse"
+        )
     with col2:
         st.info("💡 **AI 코치 진단**: 설문 응답을 분석한 결과, 전기요금을 크게 절감할 수 있는 주요 낭비 요인들이 발견되었습니다.")
         
