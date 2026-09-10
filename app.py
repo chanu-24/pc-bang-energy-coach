@@ -9,13 +9,13 @@ st.set_page_config(
     layout="centered"
 )
 
-# 1. 백엔드: 조명과 기타 설비를 분리한 5대 설비 정격 스펙 및 상세 계산 파이프라인
+# 1. 백엔드: 실제 설문 문항(15문항)과 1:1 매칭되는 5대 설비 스펙 및 계산 파이프라인
 @st.cache_data
 def load_pc_bang_data():
     equipment_df = pd.DataFrame([
         {"equipment": "PC_MONITOR", "name": "💻 PC 및 모니터 (대기전력 관리)", "rated_power_kw": 0.25, "default_hours": 24},
         {"equipment": "HVAC", "name": "❄️ 에어컨 및 환기 설비 (냉방/공조)", "rated_power_kw": 3.5, "default_hours": 10},
-        {"equipment": "KITCHEN", "name": "🍳 주방·식당 설비 (라면조리기/쇼케이스)", "rated_power_kw": 2.0, "default_hours": 12},
+        {"equipment": "KITCHEN", "name": "🍳 주방 조리기구 (라면조리기·튀김기)", "rated_power_kw": 2.0, "default_hours": 8},
         {"equipment": "LIGHTING", "name": "💡 매장 조명 설비 (간판/인테리어)", "rated_power_kw": 0.8, "default_hours": 12},
         {"equipment": "ETC", "name": "🔌 기타 부대 설비 (정수기·제빙기·서버)", "rated_power_kw": 0.5, "default_hours": 24}
     ])
@@ -30,7 +30,7 @@ def calculate_detailed_impact(answers, equipment_df):
     ac_count = answers.get("ac_count", 4)
     ac_hours = answers.get("ac_hours", 10)
     
-    radio_keys = ["q3_idle", "q4_pc_manage", "q5_spec", "q7_monitor", "q9_temp", "q11_filter", "q12_door", "q13_lighting", "q14_light"]
+    radio_keys = ["q3_idle", "q4_pc_manage", "q5_spec", "q7_monitor", "q9_temp", "q11_filter", "q12_door", "q13_lighting", "q14_light", "q15_kitchen"]
     unknown_count = sum(1 for k in radio_keys if answers.get(k) == "모름")
     unknown_penalty = 1.0 + (unknown_count * 0.1)
     
@@ -59,8 +59,11 @@ def calculate_detailed_impact(answers, equipment_df):
             a_kwh = b_kwh * 0.80
             
         elif eq == "KITCHEN":
-            b_kwh = row["rated_power_kw"] * (pc_count / 30) * 12 * 30 * unknown_penalty
-            a_kwh = b_kwh * 0.85
+            kitchen_map = {"주문 시 즉시 가동": 0.9, "상시 고온 예열 유지": 1.3, "모름": 1.2}
+            kitchen_w = kitchen_map.get(answers.get("q15_kitchen", "상시 고온 예열 유지"), 1.2)
+            
+            b_kwh = row["rated_power_kw"] * 2 * 8 * 30 * kitchen_w * unknown_penalty
+            a_kwh = b_kwh * 0.80
             
         elif eq == "LIGHTING":
             light_map = {"LED": 0.8, "LED와 일반조명 혼합": 1.1, "형광등·일반조명 중심": 1.4, "모름": 1.3}
@@ -87,7 +90,7 @@ def calculate_detailed_impact(answers, equipment_df):
 def python_rule_engine(answers):
     diagnoses = []
     
-    radio_keys = ["q3_idle", "q4_pc_manage", "q5_spec", "q7_monitor", "q9_temp", "q11_filter", "q12_door", "q13_lighting", "q14_light"]
+    radio_keys = ["q3_idle", "q4_pc_manage", "q5_spec", "q7_monitor", "q9_temp", "q11_filter", "q12_door", "q13_lighting", "q14_light", "q15_kitchen"]
     unknown_count = sum(1 for k in radio_keys if answers.get(k) == "모름")
     
     if unknown_count > 0:
@@ -109,17 +112,17 @@ def python_rule_engine(answers):
             "description": "실내 적정 온도(26℃)보다 낮게 설정되어 냉방 전력이 과다하게 소모되고 있습니다.",
             "equipment": "HVAC", "risk_score": 85
         })
+    if answers.get("q15_kitchen") == "상시 고온 예열 유지":
+        diagnoses.append({
+            "title": "주방 조리기구(라면조리기·튀김기) 상시 고온 예열",
+            "description": "주문이 없는 시간대에도 조리기구 온도를 높게 유지하여 불필요한 전력 소모가 발생하고 있습니다.",
+            "equipment": "KITCHEN", "risk_score": 80
+        })
     if answers.get("q12_door") in ["자주 열려있음", "계속 열어둠"]:
         diagnoses.append({
             "title": "냉방 중 출입문 개방으로 인한 냉기 손실",
             "description": "출입문이 열려 있어 냉기가 지속 유실되며 냉방 에어컨 부하가 가중되고 있습니다.",
-            "equipment": "HVAC", "risk_score": 80
-        })
-    if answers.get("q13_lighting") == "계속 켜둠":
-        diagnoses.append({
-            "title": "손님이 없는 구역의 조명 상시 점등",
-            "description": "이용객이 없는 구역까지 실내 조명이 계속 켜져 있어 전력이 낭비되고 있습니다.",
-            "equipment": "LIGHTING", "risk_score": 60
+            "equipment": "HVAC", "risk_score": 75
         })
         
     if not diagnoses:
@@ -138,7 +141,7 @@ def init_rag_db():
     if col.count() == 0:
         col.add(ids=["doc_1"], documents=["[에너지공단] PC·모니터 절전: 빈 좌석 자동 타임아웃 및 마스터 차단기로 대기전력 원천 차단."], metadatas=[{"equipment": "PC_MONITOR"}])
         col.add(ids=["doc_2"], documents=["[에너지공단] 냉방 효율화: 에어컨 설정온도 26도 유지 및 문 닫고 냉방하기로 전력 손실 방지."], metadatas=[{"equipment": "HVAC"}])
-        col.add(ids=["doc_3"], documents=["[에너지공단] 주방·식당 가전: 라면조리기/쇼케이스 야간 단열 커튼 설치 및 예열 관리."], metadatas=[{"equipment": "KITCHEN"}])
+        col.add(ids=["doc_3"], documents=["[에너지공단] 주방 조리기구: 주문 직전 가동 시작 및 브레이크 타임 전원 차단."], metadatas=[{"equipment": "KITCHEN"}])
         col.add(ids=["doc_4"], documents=["[에너지공단] 매장 조명 설비: 미사용 구역 소등 및 고효율 LED 조명 교체."], metadatas=[{"equipment": "LIGHTING"}])
         col.add(ids=["doc_5"], documents=["[에너지공단] 기타 부대 설비: 정수기 및 제빙기 절전 모드 활용."], metadatas=[{"equipment": "ETC"}])
     return col
@@ -158,10 +161,10 @@ if "answers" not in st.session_state:
         "q3_idle": "모름", "q4_pc_manage": "모름", "q5_spec": "모름",
         "q6_power": "모름", "q7_monitor": "모름", "q9_temp": "모름",
         "q11_filter": "모름", "q12_door": "모름",
-        "q13_lighting": "모름", "q14_light": "모름", "q15_bill": "모름"
+        "q13_lighting": "모름", "q14_light": "모름", "q15_kitchen": "모름"
     }
 
-# [페이지 1] 15개 전체 설문 입력폼
+# [페이지 1] 15개 전체 설문 입력폼 (라면·튀김기 문항 명확히 포함)
 if st.session_state.step == 1:
     st.title("⚡ PC방 에너지 진단 설문 (15개 문항)")
     st.write("매장 운영 상태를 입력하시면 맞춤형 전력 분석이 시작됩니다.")
@@ -181,12 +184,12 @@ if st.session_state.step == 1:
         q9_temp = st.radio("9. 여름철 에어컨은 보통 몇 ℃로 설정하시나요?", ["22℃ 이하", "23~24℃", "25℃", "26℃ 이상", "모름", "미사용"])
         ac_hours = st.slider("10. 냉방하는 날에는 에어컨을 하루 평균 몇 시간 사용하시나요?", min_value=0, max_value=24, value=st.session_state.answers.get("ac_hours", 10))
         
-        st.subheader("3 냉방 습관과 조명 및 월 사용량")
+        st.subheader("3 냉방 습관과 조명 및 주방 조리기구 관리")
         q11_filter = st.radio("11. 에어컨 필터는 얼마나 자주 청소하시나요?", ["2 주 이내", "2 주 초과~1 개월", "1 개월 초과~3 개월", "3 개월 초과", "거의 안 함", "모름"])
         q12_door = st.radio("12. 냉방 중 출입문은 어떻게 관리하시나요?", ["출입할 때만 열고 닫음", "자주 열려있음", "계속 열어둠", "모름", "미사용"])
         q13_lighting = st.radio("13. 손님이 없는 구역의 조명은 어떻게 관리하시나요?", ["구역별로 모두 끔", "일부만 끔", "계속 켜둠", "빈 구역 없음", "모름"])
         q14_light = st.radio("14. 매장 조명은 대부분 어떤 종류인가요?", ["LED", "LED와 일반조명 혼합", "형광등·일반조명 중심", "모름"])
-        q15_bill = st.text_input("15. 최근 한 달 전기사용량을 알고 계신가요?", value=st.session_state.answers.get("q15_bill", "모름"))
+        q15_kitchen = st.radio("15. 주방 조리기구(라면조리기·튀김기)는 평소 어떻게 관리하시나요?", ["주문 시 즉시 가동", "상시 고온 예열 유지", "모름"])
 
         submitted = st.form_submit_button("AI 정밀 진단하기 🚀", use_container_width=True)
         if submitted:
@@ -198,7 +201,7 @@ if st.session_state.step == 1:
                 "q9_temp": q9_temp, "ac_hours": ac_hours,
                 "q11_filter": q11_filter, "q12_door": q12_door,
                 "q13_lighting": q13_lighting, "q14_light": q14_light,
-                "q15_bill": q15_bill
+                "q15_kitchen": q15_kitchen
             }
             st.session_state.step = 2
             st.rerun()
@@ -208,10 +211,10 @@ elif st.session_state.step == 2:
     st.title("🔍 AI 에너지 진단 결과")
     diagnoses = python_rule_engine(st.session_state.answers)
     
-    radio_keys = ["q3_idle", "q4_pc_manage", "q5_spec", "q7_monitor", "q9_temp", "q11_filter", "q12_door", "q13_lighting", "q14_light"]
+    radio_keys = ["q3_idle", "q4_pc_manage", "q5_spec", "q7_monitor", "q9_temp", "q11_filter", "q12_door", "q13_lighting", "q14_light", "q15_kitchen"]
     unknown_cnt = sum(1 for k in radio_keys if st.session_state.answers.get(k) == "모름")
     
-    base_score = 95 - (unknown_cnt * 7)
+    base_score = 95 - (unknown_cnt * 6)
     max_risk = max([d["risk_score"] for d in diagnoses]) if diagnoses else 50
     efficiency_score = max(30, int(base_score - (max_risk * 0.3)))
     
@@ -225,7 +228,7 @@ elif st.session_state.step == 2:
         )
     with col2:
         if unknown_cnt >= 2:
-            st.error(f"⚠️ **관리 부실 경고**: '모름' 응답이 {unknown_cnt}개입니다. 전력 사용 현황을 전혀 파악하지 못하고 있어 요금 낭비 위험이 극심합니다!")
+            st.error(f"⚠️ **관리 부실 경고**: '모름' 응답이 {unknown_cnt}개입니다. 전력 사용 현황을 파악하지 못하고 있어 요금 낭비 위험이 극심합니다!")
         else:
             st.info(f"💡 입력하신 **{st.session_state.answers.get('pc_count', 100)}석** 매장의 분석 결과입니다.")
         
