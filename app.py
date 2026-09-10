@@ -237,7 +237,7 @@ elif st.session_state.step == 2:
         if st.button("📈 상세 감액 분석 보기 ➔", use_container_width=True):
             st.session_state.step = 3; st.rerun()
 
-# [페이지 3] 예상 전력절감 및 감액가능 상세 분석
+# [페이지 3] 예상 전력절감 및 감액가능 상세 분석 (텍스트 잘림 방지 커스텀 HTML 카드 적용)
 elif st.session_state.step == 3:
     pc_count_val = st.session_state.answers.get("pc_count", 100)
     st.title(f"📈 예상 전력절감 및 감액가능 상세 분석 ({pc_count_val}석 기준)")
@@ -254,26 +254,35 @@ elif st.session_state.step == 3:
     saved_kwh = int(tot_b_kwh - tot_a_kwh)
     saved_carb = round(tot_b_carb - tot_a_carb, 1)
     
-    # 상단 카드: 전력절감 가능 / 감액가능 형태로 직관적 표현
-    m1, m2, m3 = st.columns(3)
-    with m1:
-        st.metric(
-            label="전력절감 가능량", 
-            value=f"↓ {saved_kwh:,} kWh", 
-            delta=f"기존 {int(tot_b_kwh):,} ➔ {int(tot_a_kwh):,} (절감가능)"
-        )
-    with m2:
-        st.metric(
-            label="전기요금 감액가능", 
-            value=f"↓ {saved_cost:,} 원", 
-            delta=f"기존 {int(tot_b_cost):,}원 ➔ {int(tot_a_cost):,}원 (감액가능)"
-        )
-    with m3:
-        st.metric(
-            label="탄소 감축가능량", 
-            value=f"↓ {saved_carb} kg", 
-            delta=f"기존 {round(tot_b_carb, 1)} ➔ {round(tot_a_carb, 1)} (감축가능)"
-        )
+    # 글자 잘림 현상(말줄임표)을 원천 차단하기 위해 HTML/CSS 커스텀 카드 박스 활용
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown(f"""
+        <div style="background-color:#f8fafc; border:1px solid #e2e8f0; padding:16px; border-radius:10px; text-align:center;">
+            <div style="font-size:13px; color:#64748b; font-weight:600; margin-bottom:4px;">전력절감 가능량</div>
+            <div style="font-size:24px; color:#1e293b; font-weight:bold; margin-bottom:8px;">↓ {saved_kwh:,} kWh</div>
+            <div style="font-size:12px; color:#059669; background-color:#ecfdf5; padding:4px 8px; border-radius:6px; display:inline-block;">기존 {int(tot_b_kwh):,} ➔ {int(tot_a_kwh):,} (절감가능)</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with col2:
+        st.markdown(f"""
+        <div style="background-color:#f8fafc; border:1px solid #e2e8f0; padding:16px; border-radius:10px; text-align:center;">
+            <div style="font-size:13px; color:#64748b; font-weight:600; margin-bottom:4px;">전기요금 감액가능</div>
+            <div style="font-size:24px; color:#1e293b; font-weight:bold; margin-bottom:8px;">↓ {saved_cost:,} 원</div>
+            <div style="font-size:12px; color:#059669; background-color:#ecfdf5; padding:4px 8px; border-radius:6px; display:inline-block;">기존 {int(tot_b_cost):,}원 ➔ {int(tot_a_cost):,}원 (감액가능)</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with col3:
+        st.markdown(f"""
+        <div style="background-color:#f8fafc; border:1px solid #e2e8f0; padding:16px; border-radius:10px; text-align:center;">
+            <div style="font-size:13px; color:#64748b; font-weight:600; margin-bottom:4px;">탄소 감축가능량</div>
+            <div style="font-size:24px; color:#1e293b; font-weight:bold; margin-bottom:8px;">↓ {saved_carb} kg</div>
+            <div style="font-size:12px; color:#059669; background-color:#ecfdf5; padding:4px 8px; border-radius:6px; display:inline-block;">기존 {round(tot_b_carb, 1)} ➔ {round(tot_a_carb, 1)} (감축가능)</div>
+        </div>
+        """, unsafe_allow_html=True)
         
     st.markdown("---")
     st.subheader("🔍 설비별 상세 전력절감 및 감액가능 내역")
