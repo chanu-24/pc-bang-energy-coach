@@ -237,11 +237,11 @@ elif st.session_state.step == 2:
         if st.button("📈 상세 감액 분석 보기 ➔", use_container_width=True):
             st.session_state.step = 3; st.rerun()
 
-# [페이지 3] 예상 절감 효과 및 상세 감액 분석 (요청하신 감액 중심 큰 글씨 레이아웃 반영)
+# [페이지 3] 예상 전력절감 및 감액가능 상세 분석
 elif st.session_state.step == 3:
     pc_count_val = st.session_state.answers.get("pc_count", 100)
-    st.title(f"📈 예상 감액 효과 상세 분석 ({pc_count_val}석 기준)")
-    st.write("입력하신 매장 운영 정보 및 15개 진단 결과를 바탕으로 산출된 월간 감액 및 요금 비교입니다.")
+    st.title(f"📈 예상 전력절감 및 감액가능 상세 분석 ({pc_count_val}석 기준)")
+    st.write("진단 가이드를 실천할 경우 기대되는 월간 전력절감 및 감액가능 금액 비교입니다.")
     
     eq_df = load_pc_bang_data()
     b_df, a_df = calculate_detailed_impact(st.session_state.answers, eq_df)
@@ -254,29 +254,29 @@ elif st.session_state.step == 3:
     saved_kwh = int(tot_b_kwh - tot_a_kwh)
     saved_carb = round(tot_b_carb - tot_a_carb, 1)
     
-    # 요청사항 반영: 감액 금액을 가장 크게 보여주고 아래에 기존->변경 요금 명시
+    # 상단 카드: 전력절감 가능 / 감액가능 형태로 직관적 표현
     m1, m2, m3 = st.columns(3)
     with m1:
         st.metric(
-            label="월 전력 감축량", 
+            label="전력절감 가능량", 
             value=f"↓ {saved_kwh:,} kWh", 
-            delta=f"기존 {int(tot_b_kwh):,} ➔ {int(tot_a_kwh):,}"
+            delta=f"기존 {int(tot_b_kwh):,} ➔ {int(tot_a_kwh):,} (절감가능)"
         )
     with m2:
         st.metric(
-            label="월 전기요금 감액", 
+            label="전기요금 감액가능", 
             value=f"↓ {saved_cost:,} 원", 
-            delta=f"기존 {int(tot_b_cost):,}원 ➔ {int(tot_a_cost):,}원"
+            delta=f"기존 {int(tot_b_cost):,}원 ➔ {int(tot_a_cost):,}원 (감액가능)"
         )
     with m3:
         st.metric(
-            label="월 탄소 감축량", 
+            label="탄소 감축가능량", 
             value=f"↓ {saved_carb} kg", 
-            delta=f"기존 {round(tot_b_carb, 1)} ➔ {round(tot_a_carb, 1)}"
+            delta=f"기존 {round(tot_b_carb, 1)} ➔ {round(tot_a_carb, 1)} (감축가능)"
         )
         
     st.markdown("---")
-    st.subheader("🔍 설비별 상세 전력 및 요금 감액 내역")
+    st.subheader("🔍 설비별 상세 전력절감 및 감액가능 내역")
     
     for i in range(len(b_df)):
         name = b_df.loc[i, "name"]
@@ -289,10 +289,10 @@ elif st.session_state.step == 3:
         <div style="background-color:#f1f5f9; border-left:5px solid #3b82f6; padding:15px; border-radius:8px; margin-bottom:12px;">
             <h4 style="margin:0 0 8px 0; color:#1e293b;">{name}</h4>
             <p style="margin:4px 0; font-size:14px; color:#334155;">
-               • <b>전력량 변화:</b> <span style="color:#dc2626;">{b_kwh:,.1f} kWh</span> ➔ <span style="color:#16a34a;">{a_kwh:,.1f} kWh</span> (<b>총 {diff_kwh:,.1f} kWh 절감</b>)
+               • <b>전력절감 가능:</b> <span style="color:#dc2626;">{b_kwh:,.1f} kWh</span> ➔ <span style="color:#16a34a;">{a_kwh:,.1f} kWh</span> (<b>총 {diff_kwh:,.1f} kWh 절감가능</b>)
             </p>
             <p style="margin:4px 0; font-size:14px; color:#334155;">
-               • <b>요금 변화:</b> <span style="color:#dc2626;">{b_cost:,} 원</span> ➔ <span style="color:#16a34a;">{a_cost:,} 원</span> (<b>총 {diff_cost:,} 원 감액</b>)
+               • <b>요금 감액가능:</b> <span style="color:#dc2626;">{b_cost:,} 원</span> ➔ <span style="color:#16a34a;">{a_cost:,} 원</span> (<b>총 {diff_cost:,} 원 감액가능</b>)
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -302,10 +302,10 @@ elif st.session_state.step == 3:
     comparison_df = pd.DataFrame({
         "설비 부문": b_df["name"],
         "기존 전력": b_df["kwh"].apply(lambda x: f"{x:,.1f} kWh"),
-        "개선 후 전력": a_df["kwh"].apply(lambda x: f"{x:,.1f} kWh"),
+        "절감 후 전력": a_df["kwh"].apply(lambda x: f"{x:,.1f} kWh"),
         "기존 요금": b_df["cost"].apply(lambda x: f"{x:,} 원"),
         "개선 후 요금": a_df["cost"].apply(lambda x: f"{x:,} 원"),
-        "월 감액 금액": (b_df["cost"] - a_df["cost"]).apply(lambda x: f"{int(x):,} 원")
+        "월 감액가능 금액": (b_df["cost"] - a_df["cost"]).apply(lambda x: f"{int(x):,} 원")
     })
     st.dataframe(comparison_df, use_container_width=True, hide_index=True)
     
