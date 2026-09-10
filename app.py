@@ -24,7 +24,6 @@ def calculate_energy_impact(survey_answers, equipment_df, pc_count):
     CARBON_FACTOR = 0.4781
     KRW_PER_KWH = 130.0 
     
-    # 100석 기준 대비 매장 규모 비율 (PC 대수에 따라 냉난방/조명 등 전체 부하도 함께 연동)
     scale_factor = pc_count / 100.0
     
     results = []
@@ -32,7 +31,6 @@ def calculate_energy_impact(survey_answers, equipment_df, pc_count):
         eq = row["equipment"]
         inefficiency_weight = survey_answers.get(eq, 1.0)
         
-        # PC 대수(scale_factor)를 반영한 월간 전력량 계산
         base_power = row["rated_power_kw"] * pc_count if eq == "PC_MONITOR" else row["rated_power_kw"] * (1 + (scale_factor - 1) * 0.5)
         monthly_kwh = base_power * row["default_hours"] * 30 * inefficiency_weight
         
@@ -128,9 +126,15 @@ def search_rag_guides(equipment_type):
     results = rag_collection.query(query_texts=["에너지 절감 방법 가이드"], n_results=1, where={"equipment": equipment_type})
     return results["documents"][0][0] if results["documents"] else "관련 공식 가이드가 없습니다."
 
-# 4. 프론트엔드 UI 페이지 흐름
+# 4. 세션 상태 안전 초기화 (에러 방지 핵심)
 if "step" not in st.session_state:
     st.session_state.step = 1
+if "pc_count" not in st.session_state:
+    st.session_state.pc_count = 100
+if "survey_answers" not in st.session_state:
+    st.session_state.survey_answers = {}
+if "weights" not in st.session_state:
+    st.session_state.weights = {"PC_MONITOR": 1.0, "HVAC": 1.0, "KITCHEN": 1.0, "LIGHTING": 1.0}
 
 # [페이지 1] 기본 정보(석 수) 및 상세 설문지
 if st.session_state.step == 1:
@@ -139,7 +143,7 @@ if st.session_state.step == 1:
     
     with st.form("detailed_survey_form"):
         st.subheader("🖥️ [매장 기본 정보]")
-        pc_count = st.number_input("매장 PC 총 대수 (석 수)", min_value=10, max_value=500, value=100, step=10)
+        pc_count = st.number_input("매장 PC 총 대수 (석 수)", min_value=10, max_value=500, value=st.session_state.pc_count, step=10)
         
         st.subheader("🖥️ [PC 및 주변기기 영역]")
         q1 = st.radio("Q1. 손님이 퇴석한 PC 좌석 및 대기전력 관리 방식은?", ["즉시 전원 차단", "자동 타임아웃 활용", "방치함"])
