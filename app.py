@@ -232,6 +232,7 @@ elif st.session_state.step == 2:
             st.rerun()
 
 # [페이지 3] 예상 절감 효과 및 감액 상세 분석
+# [페이지 3] 예상 절감 효과 및 감액 상세 분석 (텍스트 최적화 버전)
 elif st.session_state.step == 3:
     pc_count_val = st.session_state.answers.get("pc_count", 100)
     st.title(f"📈 예상 절감 효과 상세 분석 ({pc_count_val}석 기준)")
@@ -261,26 +262,27 @@ elif st.session_state.step == 3:
     after_carbon = after_impact_df["monthly_carbon"].sum()
     saved_carbon = before_carbon - after_carbon
     
+    # 텍스트가 잘리지 않도록 핵심만 간결하게 표현한 메트릭 카드 사용
     m1, m2, m3 = st.columns(3)
     with m1:
         st.metric(
-            label="월 전력 사용량 비교", 
+            label="월 전력 사용량", 
             value=f"{int(after_kwh):,} kWh", 
-            delta=f"-{int(saved_kwh):,} kWh 절감 (기존 {int(before_kwh):,} kWh)", 
+            delta=f"↓ {int(saved_kwh):,} 절감 (기존 {int(before_kwh):,})", 
             delta_color="normal"
         )
     with m2:
         st.metric(
             label="월 전기요금 감액", 
             value=f"{int(after_cost):,} 원", 
-            delta=f"-{int(saved_cost):,} 원 감액 (기존 {int(before_cost):,} 원)", 
+            delta=f"↓ {int(saved_cost):,}원 감액", 
             delta_color="normal"
         )
     with m3:
         st.metric(
             label="월 탄소 감축량", 
-            value=f"{round(after_carbon, 1)} kgCO₂e", 
-            delta=f"-{round(saved_carbon, 1)} 감축", 
+            value=f"{round(after_carbon, 1)} kg", 
+            delta=f"↓ {round(saved_carbon, 1)} kg 감축", 
             delta_color="normal"
         )
         
