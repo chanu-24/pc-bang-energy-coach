@@ -9,12 +9,13 @@ st.set_page_config(
     layout="centered"
 )
 
-# 1. 백엔드: 설비별 정격 스펙 및 상세 계산 파이프라인
+# 1. 백엔드: 식당 설비가 포함된 4대 설비 정격 스펙 및 상세 계산 파이프라인
 @st.cache_data
 def load_pc_bang_data():
     equipment_df = pd.DataFrame([
         {"equipment": "PC_MONITOR", "name": "💻 PC 및 모니터 (대기전력 관리)", "rated_power_kw": 0.25, "default_hours": 24},
         {"equipment": "HVAC", "name": "❄️ 에어컨 및 환기 설비 (냉방/공조)", "rated_power_kw": 3.5, "default_hours": 10},
+        {"equipment": "KITCHEN", "name": "🍳 주방·식당 설비 (라면조리기/쇼케이스)", "rated_power_kw": 2.0, "default_hours": 12},
         {"equipment": "LIGHTING", "name": "💡 매장 조명 및 기타 설비", "rated_power_kw": 1.0, "default_hours": 12}
     ])
     return equipment_df
@@ -30,7 +31,7 @@ def calculate_detailed_impact(answers, equipment_df):
     
     radio_keys = ["q3_idle", "q4_pc_manage", "q5_spec", "q7_monitor", "q9_temp", "q11_filter", "q12_door", "q13_lighting", "q14_light"]
     unknown_count = sum(1 for k in radio_keys if answers.get(k) == "모름")
-    unknown_penalty = 1.0 + (unknown_count * 0.12)
+    unknown_penalty = 1.0 + (unknown_count * 0.1)
     
     before_results = []
     after_results = []
@@ -44,7 +45,7 @@ def calculate_detailed_impact(answers, equipment_df):
             manage_map = {"자동 절전": 0.9, "자동 종료": 0.9, "직접 종료": 1.0, "모니터만 끔": 1.2, "둘 다 켜둠": 1.4, "모름": 1.4}
             manage_w = manage_map.get(answers.get("q4_pc_manage", "직접 종료"), 1.1)
             
-            b_kwh = row["rated_power_kw"] * pc_count * op_hours * 30 * (idle_w * manage_w * unknown_penalty * 0.45)
+            b_kwh = row["rated_power_kw"] * pc_count * op_hours * 30 * (idle_w * manage_w * unknown_penalty * 0.4)
             a_kwh = b_kwh * 0.75
             
         elif eq == "HVAC":
@@ -56,7 +57,11 @@ def calculate_detailed_impact(answers, equipment_df):
             b_kwh = row["rated_power_kw"] * ac_count * ac_hours * 30 * temp_w * door_w * unknown_penalty
             a_kwh = b_kwh * 0.80
             
-        else:
+        elif eq == "KITCHEN":
+            b_kwh = row["rated_power_kw"] * (pc_count / 30) * 12 * 30 * unknown_penalty
+            a_kwh = b_kwh * 0.85
+            
+        else: # LIGHTING
             light_map = {"LED": 0.8, "LED와 일반조명 혼합": 1.1, "형광등·일반조명 중심": 1.4, "모름": 1.3}
             light_w = light_map.get(answers.get("q14_light", "형광등·일반조명 중심"), 1.2)
             
@@ -83,7 +88,7 @@ def python_rule_engine(answers):
     if unknown_count > 0:
         diagnoses.append({
             "title": f"⚠️ 매장 전력 사용 실태 파악 심각한 부족 (모름 {unknown_count}개)",
-            "description": f"주요 설비 운영 상태를 '모름'({unknown_count}개 항목)으로 응답하셨습니다. 매장의 에너지 낭비 요인을 전혀 통제하지 못하고 있어 요금 폭탄 위험이 매우 큽니다!",
+            "description": f"주요 설비 운영 상태를 '모름'({unknown_count}개 항목)으로 응답하셨습니다. 매장의 에너지 낭비 요인을 통제하지 못하고 있어 요금 폭탄 위험이 큽니다!",
             "equipment": "PC_MONITOR", "risk_score": 95 + (unknown_count * 2)
         })
 
@@ -128,7 +133,8 @@ def init_rag_db():
     if col.count() == 0:
         col.add(ids=["doc_1"], documents=["[에너지공단] PC·모니터 절전: 빈 좌석 자동 타임아웃 및 마스터 차단기로 대기전력 원천 차단."], metadatas=[{"equipment": "PC_MONITOR"}])
         col.add(ids=["doc_2"], documents=["[에너지공단] 냉방 효율화: 에어컨 설정온도 26도 유지 및 문 닫고 냉방하기로 전력 손실 방지."], metadatas=[{"equipment": "HVAC"}])
-        col.add(ids=["doc_3"], documents=["[에너지공단] 고효율 조명 이용 및 불필요한 조명 끄기: 미사용 구역 소등 및 LED 교체."], metadatas=[{"equipment": "LIGHTING"}])
+        col.add(ids=["doc_3"], documents=["[에너지공단] 주방·식당 가전: 라면조리기/쇼케이스 야간 단열 커튼 설치 및 예열 관리."], metadatas=[{"equipment": "KITCHEN"}])
+        col.add(ids=["doc_4"], documents=["[에너지공단] 고효율 조명 이용 및 불필요한 조명 끄기: 미사용 구역 소등 및 LED 교체."], metadatas=[{"equipment": "LIGHTING"}])
     return col
 
 rag_collection = init_rag_db()
@@ -237,7 +243,7 @@ elif st.session_state.step == 2:
         if st.button("📈 상세 감액 분석 보기 ➔", use_container_width=True):
             st.session_state.step = 3; st.rerun()
 
-# [페이지 3] 예상 전력절감 및 감액가능 상세 분석 (텍스트 잘림 방지 커스텀 HTML 카드 적용)
+# [페이지 3] 예상 전력절감 및 감액가능 상세 분석
 elif st.session_state.step == 3:
     pc_count_val = st.session_state.answers.get("pc_count", 100)
     st.title(f"📈 예상 전력절감 및 감액가능 상세 분석 ({pc_count_val}석 기준)")
@@ -254,7 +260,7 @@ elif st.session_state.step == 3:
     saved_kwh = int(tot_b_kwh - tot_a_kwh)
     saved_carb = round(tot_b_carb - tot_a_carb, 1)
     
-    # 글자 잘림 현상(말줄임표)을 원천 차단하기 위해 HTML/CSS 커스텀 카드 박스 활용
+    # 글자 잘림 방지 HTML 커스텀 카드 박스 적용
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -314,7 +320,7 @@ elif st.session_state.step == 3:
         "절감 후 전력": a_df["kwh"].apply(lambda x: f"{x:,.1f} kWh"),
         "기존 요금": b_df["cost"].apply(lambda x: f"{x:,} 원"),
         "개선 후 요금": a_df["cost"].apply(lambda x: f"{x:,} 원"),
-        "월 감액가능 금액": (b_df["cost"] - a_df["cost"]).apply(lambda x: f"{int(x):,} 원")
+        "월 감액가능 금액": (b_df["cost"] - b_df["cost"] + (b_df["cost"] - a_df["cost"])).apply(lambda x: f"{int(x):,} 원")
     })
     st.dataframe(comparison_df, use_container_width=True, hide_index=True)
     
