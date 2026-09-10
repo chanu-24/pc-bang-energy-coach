@@ -126,7 +126,7 @@ def search_rag_guides(equipment_type):
     results = rag_collection.query(query_texts=["에너지 절감 방법 가이드"], n_results=1, where={"equipment": equipment_type})
     return results["documents"][0][0] if results["documents"] else "관련 공식 가이드가 없습니다."
 
-# 4. 세션 상태 안전 초기화 (에러 방지 핵심)
+# 4. 세션 상태 안전 초기화
 if "step" not in st.session_state:
     st.session_state.step = 1
 if "pc_count" not in st.session_state:
@@ -136,7 +136,7 @@ if "survey_answers" not in st.session_state:
 if "weights" not in st.session_state:
     st.session_state.weights = {"PC_MONITOR": 1.0, "HVAC": 1.0, "KITCHEN": 1.0, "LIGHTING": 1.0}
 
-# [페이지 1] 기본 정보(석 수) 및 상세 설문지
+# [페이지 1] 기본 정보 및 상세 설문지
 if st.session_state.step == 1:
     st.title("⚡ PC방 에너지 진단 설문 (약 1분 소요)")
     st.write("매장 규모와 설비 운영 방식을 입력하시면 맞춤형 전력 진단이 시작됩니다.")
@@ -279,11 +279,12 @@ elif st.session_state.step == 3:
     st.markdown("---")
     st.subheader("📊 설비별 전력 소비 비교 및 절감액 상세")
     
+    # 천단위 콤마 및 소수점 포맷팅 적용
     comparison_df = pd.DataFrame({
         "설비명": before_impact_df["name"],
-        "기존 전력(kWh)": before_impact_df["monthly_kwh"],
-        "개선 후 전력(kWh)": after_impact_df["monthly_kwh"],
-        "월 절감액(원)": (before_impact_df["monthly_cost"] - after_impact_df["monthly_cost"])
+        "기존 전력(kWh)": before_impact_df["monthly_kwh"].apply(lambda x: f"{x:,.1f}"),
+        "개선 후 전력(kWh)": after_impact_df["monthly_kwh"].apply(lambda x: f"{x:,.1f}"),
+        "월 절감액(원)": (before_impact_df["monthly_cost"] - after_impact_df["monthly_cost"]).apply(lambda x: f"{int(x):,}")
     })
     
     st.dataframe(comparison_df, use_container_width=True, hide_index=True)
