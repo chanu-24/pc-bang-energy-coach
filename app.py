@@ -28,6 +28,10 @@ def calculate_detailed_impact(answers, equipment_df):
     ac_count = answers.get("ac_count", 4)
     ac_hours = answers.get("ac_hours", 10)
     
+    radio_keys = ["q3_idle", "q4_pc_manage", "q5_spec", "q7_monitor", "q9_temp", "q11_filter", "q12_door", "q13_lighting", "q14_light"]
+    unknown_count = sum(1 for k in radio_keys if answers.get(k) == "모름")
+    unknown_penalty = 1.0 + (unknown_count * 0.12)  # 모름이 많을수록 전력 소비 추정치 대폭 상향
+    
     before_results = []
     after_results = []
     
@@ -35,28 +39,28 @@ def calculate_detailed_impact(answers, equipment_df):
         eq = row["equipment"]
         
         if eq == "PC_MONITOR":
-            idle_map = {"0%": 1.0, "1~10%": 1.05, "11~30%": 1.15, "31~50%": 1.3, "51% 이상": 1.4, "모름": 1.1}
+            idle_map = {"0%": 1.0, "1~10%": 1.05, "11~30%": 1.15, "31~50%": 1.3, "51% 이상": 1.4, "모름": 1.4}
             idle_w = idle_map.get(answers.get("q3_idle", "1~10%"), 1.1)
-            manage_map = {"자동 절전": 0.9, "자동 종료": 0.9, "직접 종료": 1.0, "모니터만 끔": 1.2, "둘 다 켜둠": 1.4, "모름": 1.1}
+            manage_map = {"자동 절전": 0.9, "자동 종료": 0.9, "직접 종료": 1.0, "모니터만 끔": 1.2, "둘 다 켜둠": 1.4, "모름": 1.4}
             manage_w = manage_map.get(answers.get("q4_pc_manage", "직접 종료"), 1.1)
             
-            b_kwh = row["rated_power_kw"] * pc_count * op_hours * 30 * (idle_w * manage_w * 0.45)
+            b_kwh = row["rated_power_kw"] * pc_count * op_hours * 30 * (idle_w * manage_w * unknown_penalty * 0.45)
             a_kwh = b_kwh * 0.75
             
         elif eq == "HVAC":
-            temp_map = {"22℃ 이하": 1.3, "23~24℃": 1.1, "25℃": 1.0, "26℃ 이상": 0.9, "모름": 1.1, "미사용": 0.0}
+            temp_map = {"22℃ 이하": 1.3, "23~24℃": 1.1, "25℃": 1.0, "26℃ 이상": 0.9, "모름": 1.3, "미사용": 0.0}
             temp_w = temp_map.get(answers.get("q9_temp", "25℃"), 1.0)
-            door_map = {"출입할 때만 열고 닫음": 0.9, "자주 열려있음": 1.2, "계속 열어둠": 1.4, "모름": 1.1, "미사용": 1.0}
+            door_map = {"출입할 때만 열고 닫음": 0.9, "자주 열려있음": 1.2, "계속 열어둠": 1.4, "모름": 1.3, "미사용": 1.0}
             door_w = door_map.get(answers.get("q12_door", "출입할 때만 열고 닫음"), 1.0)
             
-            b_kwh = row["rated_power_kw"] * ac_count * ac_hours * 30 * temp_w * door_w
+            b_kwh = row["rated_power_kw"] * ac_count * ac_hours * 30 * temp_w * door_w * unknown_penalty
             a_kwh = b_kwh * 0.80
             
         else: # 조명 및 기타
-            light_map = {"LED": 0.8, "LED와 일반조명 혼합": 1.1, "형광등·일반조명 중심": 1.4, "모름": 1.2}
+            light_map = {"LED": 0.8, "LED와 일반조명 혼합": 1.1, "형광등·일반조명 중심": 1.4, "모름": 1.3}
             light_w = light_map.get(answers.get("q14_light", "형광등·일반조명 중심"), 1.2)
             
-            b_kwh = row["rated_power_kw"] * (pc_count / 20) * 12 * 30 * light_w
+            b_kwh = row["rated_power_kw"] * (pc_count / 20) * 12 * 30 * light_w * unknown_penalty
             a_kwh = b_kwh * 0.85
 
         b_cost = b_kwh * KRW_PER_KWH
@@ -69,9 +73,21 @@ def calculate_detailed_impact(answers, equipment_df):
         
     return pd.DataFrame(before_results), pd.DataFrame(after_results)
 
-# 2. 백엔드: Python Rule Engine
+# 2. 백엔드: Python Rule Engine ('모름' 대량 선택 시 대폭 감점 및 경고)
 def python_rule_engine(answers):
     diagnoses = []
+    
+    radio_keys = ["q3_idle", "q4_pc_manage", "q5_spec", "q7_monitor", "q9_temp", "q11_filter", "q12_door", "q13_lighting", "q14_light"]
+    unknown_count = sum(1 for k in radio_keys if answers.get(k) == "모름")
+    
+    # 모름이 많을수록 리스크 점수를 매우 높게 부여하여 종합 효율 점수를 깎음
+    if unknown_count > 0:
+        diagnoses.append({
+            "title": f"⚠️ 매장 전력 사용 실태 파악 심각한 부족 (모름 {unknown_count}개)",
+            "description": f"주요 설비 운영 상태를 '모름'({unknown_count}개 항목)으로 응답하셨습니다. 매장의 에너지 낭비 요인을 전혀 통제하지 못하고 있어 요금 폭탄 위험이 매우 큽니다!",
+            "equipment": "PC_MONITOR", "risk_score": 95 + (unknown_count * 2)
+        })
+
     if answers.get("q4_pc_manage") in ["모니터만 끔", "둘 다 켜둠"]:
         diagnoses.append({
             "title": "손님 없는 빈 좌석의 PC·모니터 전원 방치",
@@ -96,10 +112,11 @@ def python_rule_engine(answers):
             "description": "이용객이 없는 구역까지 실내 조명이 계속 켜져 있어 전력이 낭비되고 있습니다.",
             "equipment": "LIGHTING", "risk_score": 60
         })
+        
     if not diagnoses:
         diagnoses.append({
             "title": "전반적인 매장 설비 대기전력 점검",
-            "description": "현재 양호하나 미세 전력 누수를 정기적으로 점검하는 것을 권장합니다.",
+            "description": "현재 양호한 상태이나 미세 전력 누수를 정기적으로 점검하는 것을 권장합니다.",
             "equipment": "PC_MONITOR", "risk_score": 40
         })
     return sorted(diagnoses, key=lambda x: x["risk_score"], reverse=True)
@@ -127,10 +144,10 @@ if "step" not in st.session_state:
 if "answers" not in st.session_state:
     st.session_state.answers = {
         "pc_count": 100, "op_hours": 24, "ac_count": 4, "ac_hours": 10,
-        "q3_idle": "1~10%", "q4_pc_manage": "직접 종료", "q5_spec": "고사양",
-        "q6_power": "모름", "q7_monitor": "27인치 초과~32 인치", "q9_temp": "25℃",
-        "q11_filter": "1 개월 초과~3 개월", "q12_door": "출입할 때만 열고 닫음",
-        "q13_lighting": "구역별로 모두 끔", "q14_light": "형광등·일반조명 중심", "q15_bill": "모름"
+        "q3_idle": "모름", "q4_pc_manage": "모름", "q5_spec": "모름",
+        "q6_power": "모름", "q7_monitor": "모름", "q9_temp": "모름",
+        "q11_filter": "모름", "q12_door": "모름",
+        "q13_lighting": "모름", "q14_light": "모름", "q15_bill": "모름"
     }
 
 # [페이지 1] 15개 전체 설문 입력폼
@@ -180,14 +197,27 @@ elif st.session_state.step == 2:
     st.title("🔍 AI 에너지 진단 결과")
     diagnoses = python_rule_engine(st.session_state.answers)
     
-    avg_risk = sum([d["risk_score"] for d in diagnoses]) / len(diagnoses)
-    efficiency_score = max(30, int(100 - (avg_risk * 0.7)))
+    # '모름' 개수에 비례해 점수가 확실히 깎이도록 설계 (모름이 많으면 점수 폭락)
+    radio_keys = ["q3_idle", "q4_pc_manage", "q5_spec", "q7_monitor", "q9_temp", "q11_filter", "q12_door", "q13_lighting", "q14_light"]
+    unknown_cnt = sum(1 for k in radio_keys if st.session_state.answers.get(k) == "모름")
+    
+    base_score = 95 - (unknown_cnt * 7) # 모름 1개당 7점씩 차감
+    max_risk = max([d["risk_score"] for d in diagnoses]) if diagnoses else 50
+    efficiency_score = max(30, int(base_score - (max_risk * 0.3)))
     
     col1, col2 = st.columns([1, 2])
     with col1:
-        st.metric(label="종합 에너지 효율 점수", value=f"{efficiency_score}점", delta="개선 필요" if efficiency_score < 80 else "우수함")
+        st.metric(
+            label="종합 에너지 효율 점수", 
+            value=f"{efficiency_score}점", 
+            delta="🚨 심각한 관리 부실" if efficiency_score < 60 else "우수함",
+            delta_color="inverse"
+        )
     with col2:
-        st.info(f"💡 입력하신 **{st.session_state.answers.get('pc_count', 100)}석** 매장의 15개 항목 분석 결과입니다.")
+        if unknown_cnt >= 2:
+            st.error(f"⚠️ **관리 부실 경고**: '모름' 응답이 {unknown_cnt}개입니다. 전력 사용 현황을 전혀 파악하지 못하고 있어 요금 낭비 위험이 극심합니다!")
+        else:
+            st.info(f"💡 입력하신 **{st.session_state.answers.get('pc_count', 100)}석** 매장의 분석 결과입니다.")
         
     st.subheader("🚨 가장 먼저 확인해야 할 영역 (Rule Engine + RAG)")
     for diag in diagnoses:
@@ -260,7 +290,7 @@ elif st.session_state.step == 3:
         "개선 후 전력": a_df["kwh"].apply(lambda x: f"{x:,.1f} kWh"),
         "기존 요금": b_df["cost"].apply(lambda x: f"{x:,} 원"),
         "개선 후 요금": a_df["cost"].apply(lambda x: f"{x:,} 원"),
-        "월 감액 금액": (b_df["cost"] - b_df["cost"] + (b_df["cost"] - a_df["cost"])).apply(lambda x: f"{int(x):,} 원")
+        "월 감액 금액": (b_df["cost"] - a_df["cost"]).apply(lambda x: f"{int(x):,} 원")
     })
     st.dataframe(comparison_df, use_container_width=True, hide_index=True)
     
