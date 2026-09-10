@@ -227,25 +227,73 @@ elif st.session_state.step == 2:
             st.rerun()
 
 # [페이지 3] 예상 절감 효과
+# [페이지 3] 예상 절감 효과 (비교 및 감액 상세 표시 버전)
 elif st.session_state.step == 3:
-    st.title("📈 예상 절감 효과 (100석 기준)")
+    st.title("📈 예상 절감 효과 상세 분석 (100석 기준)")
+    st.write("AI 코칭 지침을 실천했을 때, 현재 소비량 대비 얼마나 줄어들고 비용이 감액되는지 비교한 결과입니다.")
+    
     eq_df = load_pc_bang_data()
-    impact_df = calculate_energy_impact(st.session_state.weights, eq_df)
+    # 기존 소비량 계산 (현재 설문 가중치 반영)
+    before_impact_df = calculate_energy_impact(st.session_state.weights, eq_df)
     
-    total_kwh = impact_df["monthly_kwh"].sum() * 0.18
-    total_cost = impact_df["monthly_cost"].sum() * 0.18
-    total_carbon = impact_df["monthly_carbon"].sum() * 0.18
+    # 개선 후 예상 소비량 계산 (낭비 요소 개선 시 약 18~20% 절감 가정하여 가중치 하향 조정)
+    optimized_weights = {eq: max(1.0, w * 0.8) for eq, w in st.session_state.weights.items()}
+    after_impact_df = calculate_energy_impact(optimized_weights, eq_df)
     
+    # 합산 비교 데이터
+    before_kwh = before_impact_df["monthly_kwh"].sum()
+    after_kwh = after_impact_df["monthly_kwh"].sum()
+    saved_kwh = before_kwh - after_kwh
+    
+    before_cost = before_impact_df["monthly_cost"].sum()
+    after_cost = after_impact_df["monthly_cost"].sum()
+    saved_cost = before_cost - after_cost
+    
+    before_carbon = before_impact_df["monthly_carbon"].sum()
+    after_carbon = after_impact_df["monthly_carbon"].sum()
+    saved_carbon = before_carbon - after_carbon
+    
+    # 3개 메트릭 카드 (비교 포맷 적용)
     m1, m2, m3 = st.columns(3)
     with m1:
-        st.metric(label="월 절감 전력량", value=f"{int(total_kwh)} kWh")
+        st.metric(
+            label="월 전력 사용량 비교", 
+            value=f"{int(after_kwh):,} kWh", 
+            delta=f"-{int(saved_kwh):,} kWh 절감 (기존 {int(before_kwh):,} kWh)", 
+            delta_color="normal"
+        )
     with m2:
-        st.metric(label="월 전기요금 절감", value=f"{int(total_cost):,} 원")
+        st.metric(
+            label="월 전기요금 감액", 
+            value=f"{int(after_cost):,} 원", 
+            delta=f"-{int(saved_cost):,} 원 감액 (기존 {int(before_cost):,} 원)", 
+            delta_color="normal"
+        )
     with m3:
-        st.metric(label="월 탄소 감축량", value=f"{round(total_carbon, 1)} kgCO₂e")
+        st.metric(
+            label="월 탄소 감축량", 
+            value=f"{round(after_carbon, 1)} kgCO₂e", 
+            delta=f"-{round(saved_carbon, 1)} 감축", 
+            delta_color="normal"
+        )
         
-    st.subheader("📊 설비별 전력 기여도 분석 (Pandas)")
-    st.dataframe(impact_df[["name", "monthly_kwh", "monthly_cost"]], use_container_width=True)
+    st.markdown("---")
+    st.subheader("📊 설비별 전력 소비 비교 및 절감액 상세")
+    
+    # 보기 쉽게 비교용 데이터프레임 병합
+    comparison_df = pd.DataFrame({
+        "설비명": before_impact_df["name"],
+        "기존 전력(kWh)": before_impact_df["monthly_kwh"],
+        "개선 후 전력(kWh)": after_impact_df["monthly_kwh"],
+        "월 절감액(원)": (before_impact_df["monthly_cost"] - after_impact_df["monthly_cost"])
+    })
+    
+    st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+    
+    st.markdown("""
+    > 💡 **분석 코멘트**: 퇴석 시 대기전력 자동 차단 및 심야 시간대 냉난방 제어를 우선 실천할 경우, 
+    > 매월 전기요금 고지서에서 위 금액만큼 확실한 감액 효과를 체감하실 수 있습니다.
+    """)
     
     if st.button("🔄 처음으로 돌아가기", use_container_width=True):
         st.session_state.step = 1
