@@ -30,7 +30,7 @@ def calculate_detailed_impact(answers, equipment_df):
     
     radio_keys = ["q3_idle", "q4_pc_manage", "q5_spec", "q7_monitor", "q9_temp", "q11_filter", "q12_door", "q13_lighting", "q14_light"]
     unknown_count = sum(1 for k in radio_keys if answers.get(k) == "모름")
-    unknown_penalty = 1.0 + (unknown_count * 0.12)  # 모름이 많을수록 전력 소비 추정치 대폭 상향
+    unknown_penalty = 1.0 + (unknown_count * 0.12)
     
     before_results = []
     after_results = []
@@ -56,7 +56,7 @@ def calculate_detailed_impact(answers, equipment_df):
             b_kwh = row["rated_power_kw"] * ac_count * ac_hours * 30 * temp_w * door_w * unknown_penalty
             a_kwh = b_kwh * 0.80
             
-        else: # 조명 및 기타
+        else:
             light_map = {"LED": 0.8, "LED와 일반조명 혼합": 1.1, "형광등·일반조명 중심": 1.4, "모름": 1.3}
             light_w = light_map.get(answers.get("q14_light", "형광등·일반조명 중심"), 1.2)
             
@@ -73,14 +73,13 @@ def calculate_detailed_impact(answers, equipment_df):
         
     return pd.DataFrame(before_results), pd.DataFrame(after_results)
 
-# 2. 백엔드: Python Rule Engine ('모름' 대량 선택 시 대폭 감점 및 경고)
+# 2. 백엔드: Python Rule Engine
 def python_rule_engine(answers):
     diagnoses = []
     
     radio_keys = ["q3_idle", "q4_pc_manage", "q5_spec", "q7_monitor", "q9_temp", "q11_filter", "q12_door", "q13_lighting", "q14_light"]
     unknown_count = sum(1 for k in radio_keys if answers.get(k) == "모름")
     
-    # 모름이 많을수록 리스크 점수를 매우 높게 부여하여 종합 효율 점수를 깎음
     if unknown_count > 0:
         diagnoses.append({
             "title": f"⚠️ 매장 전력 사용 실태 파악 심각한 부족 (모름 {unknown_count}개)",
@@ -197,11 +196,10 @@ elif st.session_state.step == 2:
     st.title("🔍 AI 에너지 진단 결과")
     diagnoses = python_rule_engine(st.session_state.answers)
     
-    # '모름' 개수에 비례해 점수가 확실히 깎이도록 설계 (모름이 많으면 점수 폭락)
     radio_keys = ["q3_idle", "q4_pc_manage", "q5_spec", "q7_monitor", "q9_temp", "q11_filter", "q12_door", "q13_lighting", "q14_light"]
     unknown_cnt = sum(1 for k in radio_keys if st.session_state.answers.get(k) == "모름")
     
-    base_score = 95 - (unknown_cnt * 7) # 모름 1개당 7점씩 차감
+    base_score = 95 - (unknown_cnt * 7)
     max_risk = max([d["risk_score"] for d in diagnoses]) if diagnoses else 50
     efficiency_score = max(30, int(base_score - (max_risk * 0.3)))
     
@@ -239,11 +237,11 @@ elif st.session_state.step == 2:
         if st.button("📈 상세 감액 분석 보기 ➔", use_container_width=True):
             st.session_state.step = 3; st.rerun()
 
-# [페이지 3] 예상 절감 효과 및 상세 감액 분석
+# [페이지 3] 예상 절감 효과 및 상세 감액 분석 (요청하신 감액 중심 큰 글씨 레이아웃 반영)
 elif st.session_state.step == 3:
     pc_count_val = st.session_state.answers.get("pc_count", 100)
-    st.title(f"📈 예상 절감 효과 상세 분석 ({pc_count_val}석 기준)")
-    st.write("입력하신 매장 운영 정보 및 15개 진단 결과를 바탕으로 산출된 월간 전력 사용량 및 요금 감액 비교입니다.")
+    st.title(f"📈 예상 감액 효과 상세 분석 ({pc_count_val}석 기준)")
+    st.write("입력하신 매장 운영 정보 및 15개 진단 결과를 바탕으로 산출된 월간 감액 및 요금 비교입니다.")
     
     eq_df = load_pc_bang_data()
     b_df, a_df = calculate_detailed_impact(st.session_state.answers, eq_df)
@@ -252,13 +250,30 @@ elif st.session_state.step == 3:
     tot_b_cost, tot_a_cost = b_df["cost"].sum(), a_df["cost"].sum()
     tot_b_carb, tot_a_carb = b_df["carbon"].sum(), a_df["carbon"].sum()
     
+    saved_cost = int(tot_b_cost - tot_a_cost)
+    saved_kwh = int(tot_b_kwh - tot_a_kwh)
+    saved_carb = round(tot_b_carb - tot_a_carb, 1)
+    
+    # 요청사항 반영: 감액 금액을 가장 크게 보여주고 아래에 기존->변경 요금 명시
     m1, m2, m3 = st.columns(3)
     with m1:
-        st.metric("월 총 전력 사용량", f"{int(tot_a_kwh):,} kWh", f"↓ {int(tot_b_kwh - tot_a_kwh):,} 절감 (기존 {int(tot_b_kwh):,})")
+        st.metric(
+            label="월 전력 감축량", 
+            value=f"↓ {saved_kwh:,} kWh", 
+            delta=f"기존 {int(tot_b_kwh):,} ➔ {int(tot_a_kwh):,}"
+        )
     with m2:
-        st.metric("월 총 전기요금", f"{int(tot_a_cost):,} 원", f"↓ {int(tot_b_cost - tot_a_cost):,}원 감액")
+        st.metric(
+            label="월 전기요금 감액", 
+            value=f"↓ {saved_cost:,} 원", 
+            delta=f"기존 {int(tot_b_cost):,}원 ➔ {int(tot_a_cost):,}원"
+        )
     with m3:
-        st.metric("월 탄소 배출량", f"{round(tot_a_carb, 1)} kg", f"↓ {round(tot_b_carb - tot_a_carb, 1)} kg 감축")
+        st.metric(
+            label="월 탄소 감축량", 
+            value=f"↓ {saved_carb} kg", 
+            delta=f"기존 {round(tot_b_carb, 1)} ➔ {round(tot_a_carb, 1)}"
+        )
         
     st.markdown("---")
     st.subheader("🔍 설비별 상세 전력 및 요금 감액 내역")
