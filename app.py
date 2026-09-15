@@ -10,10 +10,11 @@ st.set_page_config(
     layout="centered"
 )
 
-# 1. [RAG & ChromaDB] 한국에너지공단 공식 가이드 및 지식 베이스 초기화
+# 1. [RAG & ChromaDB] 멈춤 방지 EphemeralClient 및 가벼운 임베딩 초기화
 @st.cache_resource
 def init_rag_system():
-    client = chromadb.Client()
+    # 외부 ONNX 모델 다운로드로 인한 멈춤 현상 방지를 위해 EphemeralClient 사용
+    client = chromadb.EphemeralClient()
     ef = embedding_functions.DefaultEmbeddingFunction()
     
     collection = client.get_or_create_collection(
@@ -61,13 +62,6 @@ st.markdown("""
         text-align: center;
         margin-bottom: 20px;
         box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
-    }
-    .metric-badge {
-        background-color: #0f172a;
-        border: 1px solid #475569;
-        padding: 12px;
-        border-radius: 12px;
-        text-align: center;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -170,15 +164,13 @@ elif st.session_state.step == 5:
     pc_count = st.session_state.answers.get("pc_count", 50)
     
     # [Python 정량 계산 엔진 로직]
-    # 한전 일반용 전력 단가: 약 130원/kWh, 탄소 배출계수: 0.4781 kgCO2e/kWh
-    # 최저시급(인건비 환산 기준): 10,030원
     KRW_PER_KWH = 130
     CARBON_FACTOR = 0.4781
     HOURLY_WAGE = 10030
     
-    base_kwh = pc_count * 190  # 기존 월 소비량 기준
-    min_saved_kwh = int(base_kwh * 0.30)  # Min 절감량 (30%)
-    max_saved_kwh = int(base_kwh * 0.45)  # Max 절감량 (45%)
+    base_kwh = pc_count * 190  
+    min_saved_kwh = int(base_kwh * 0.30)  
+    max_saved_kwh = int(base_kwh * 0.45)  
     
     min_saved_cost = min_saved_kwh * KRW_PER_KWH
     max_saved_cost = max_saved_kwh * KRW_PER_KWH
@@ -187,10 +179,6 @@ elif st.session_state.step == 5:
     max_hours = int(max_saved_cost / HOURLY_WAGE)
     
     base_cost = base_kwh * KRW_PER_KWH
-    min_cost_after = base_cost - max_saved_cost
-    max_cost_after = base_cost - min_saved_kwh * KRW_PER_KWH
-    
-    base_carbon = base_kwh * CARBON_FACTOR
     min_carbon_saved = min_saved_kwh * CARBON_FACTOR
     max_carbon_saved = max_saved_kwh * CARBON_FACTOR
     
@@ -258,13 +246,13 @@ elif st.session_state.step == 5:
     with col2:
         st.metric("월 총 전기요금", f"{base_cost:,}원", f"↓ {min_saved_cost:,} ~ {max_saved_cost:,}원 절감", delta_color="inverse")
     with col3:
-        st.metric("월 탄소 배출량", f"{int(base_carbon):,} kg", f"↓ {int(min_carbon_saved):,} ~ {int(max_carbon_saved):,} kg 감축", delta_color="inverse")
+        st.metric("월 탄소 배출량", f"{int(base_kwh * CARBON_FACTOR):,} kg", f"↓ {int(min_carbon_saved):,} ~ {int(max_carbon_saved):,} kg 감축", delta_color="inverse")
         
     st.markdown("---")
     st.subheader("❓ 어디에서 가장 많이 줄일 수 있나요?")
     st.info("""
     📊 **정량 계산 엔진 분석 결과**:
-    * **모니터 영역(30%)**과 **설비/본체 영역(30%)**에서 전체 절감액의 60폭 이상을 차지합니다. 
+    * **모니터 영역(30%)**과 **설비/본체 영역(30%)**에서 전체 절감액의 60% 이상을 차지합니다. 
     * 따라서 매장 내 **모니터 대기전력 자동 차단**과 **게임 프레임 제한 및 업데이트 자동 종료 시스템**을 가장 먼저 도입하는 것이 투자 대비 가장 큰 감액 효과를 냅니다.
     """)
     
